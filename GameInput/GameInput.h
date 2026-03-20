@@ -1,1 +1,1 @@
-static_assert(false, "Please read build instructions in this repo's readme.");
+static_assert(false, "Refer to build requirements and replace this file with the GameInput V2 header.");
