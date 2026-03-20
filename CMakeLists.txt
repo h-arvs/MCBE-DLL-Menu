@@ -7,7 +7,7 @@ file(
 include(${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM.cmake)
 set(CPM_SOURCE_CACHE ${CMAKE_SOURCE_DIR}/cpm-cache)
 
-cmake_minimum_required(VERSION 4.1)
+cmake_minimum_required(VERSION 3.5)
 project(dll)
 set(CMAKE_CXX_STANDARD 23)
 
