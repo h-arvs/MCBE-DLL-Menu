@@ -11,7 +11,7 @@ cmake_minimum_required(VERSION 4.1)
 project(dll)
 set(CMAKE_CXX_STANDARD 23)
 
-file(GLOB_RECURSE sources "imgui/*.h" "imgui/*.cpp")
+file(GLOB_RECURSE sources "imgui/*.cpp")
 add_library(dll SHARED library.cpp ${sources})
 
 CPMAddPackage("https://github.com/cursey/safetyhook.git#main")
