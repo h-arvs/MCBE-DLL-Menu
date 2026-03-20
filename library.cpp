@@ -14,7 +14,7 @@
 #include "imgui/imgui_impl_dx11.h"
 #include "imgui/imgui_impl_win32.h"
 
-#include "GameInput/GameInput.hpp"
+#include "GameInput/GameInput.h"
 
 HWND window{};
 bool uninject = false;
