@@ -18,6 +18,7 @@
 #include <readerwriterqueue.h>
 
 #include "GameInput/GameInput.h"
+#include "RmlUi/Debugger/Debugger.h"
 
 RenderInterface_DX11 rendererInterface{};
 SystemInterface_Win32 systemInterface{};
@@ -152,8 +153,8 @@ void executeCommandListsHook(ID3D12CommandQueue *queue, UINT NumCommandLists,
 };
 
 safetyhook::InlineHook resizeBuffers1HookImpl{};
-HRESULT resizeBuffers1Hook(IDXGISwapChain *swapChain, UINT bufferCount, UINT width, UINT height, DXGI_FORMAT newFormat,
-                           UINT swapChainFlags, const UINT *pCreationNodeMask, IUnknown *ppPresentQueue) {
+HRESULT resizeBuffersHook(IDXGISwapChain *swapChain, UINT bufferCount, UINT width, UINT height, DXGI_FORMAT newFormat,
+                          UINT swapChainFlags, const UINT *pCreationNodeMask, IUnknown *ppPresentQueue) {
 
     mainContext->SetDimensions({static_cast<int>(width), static_cast<int>(height)});
     rendererInterface.SetViewport(width, height);
@@ -195,6 +196,10 @@ LRESULT wndProcHook(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
      */
     wndProcQueue.enqueue({hWnd, uMsg, wParam, lParam});
 
+    if (uMsg == WM_KEYUP && wParam == VK_INSERT) {
+        Rml::Debugger::SetVisible(!Rml::Debugger::IsVisible());
+    }
+
     // You can intercept keyboard input, and all other WndProc messages except mouse, here.
 
     return CallWindowProc(reinterpret_cast<WNDPROC>(wndProcO), hWnd, uMsg, wParam, lParam);
@@ -221,9 +226,11 @@ void load(HMODULE module) {
 
     RECT rect{};
     GetWindowRect(window, &rect);
-    auto size = Rml::Vector2i(rect.bottom - rect.top, rect.right - rect.left);
+    auto size = Rml::Vector2i(rect.right - rect.left, rect.bottom - rect.top);
     mainContext = Rml::CreateContext("mainContext", size, &rendererInterface);
     rendererInterface.SetViewport(size.x, size.y);
+
+    Rml::Debugger::Initialise(mainContext);
 
     Rml::LoadFontFace("./Roboto-Black.ttf");
     std::println("Loaded font");
@@ -281,17 +288,19 @@ void load(HMODULE module) {
             executeCommandListsHookImpl = safetyhook::create_inline(
                     kiero::getMethod<&ID3D12CommandQueue::ExecuteCommandLists>(), &executeCommandListsHook);
             std::println("Hooked executeCommandLists");
+            resizeBuffers1HookImpl =
+                    safetyhook::create_inline(kiero::getMethod<&IDXGISwapChain3::ResizeBuffers1>(), &resizeBuffersHook);
+            std::println("Hooked resizeBuffers1");
         } else {
             std::println("D3D11 Detected");
+
+            resizeBuffers1HookImpl =
+                    safetyhook::create_inline(kiero::getMethod<&IDXGISwapChain::ResizeBuffers>(), &resizeBuffersHook);
+            std::println("Hooked resizeBuffers");
         }
 
         presentHookImpl = safetyhook::create_inline(kiero::getMethod<&IDXGISwapChain::Present>(), &presentHook);
         std::println("Hooked present");
-
-
-        resizeBuffers1HookImpl =
-                safetyhook::create_inline(kiero::getMethod<&IDXGISwapChain3::ResizeBuffers1>(), &resizeBuffers1Hook);
-        std::println("Hooked resizeBuffers1");
     } else {
         std::println("Failed to initialize Kiero");
     }
