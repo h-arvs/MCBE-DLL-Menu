@@ -243,18 +243,18 @@ void load(HMODULE module) {
 
             executeCommandListsHookImpl = safetyhook::create_inline(
                     kiero::getMethod<&ID3D12CommandQueue::ExecuteCommandLists>(), &executeCommandListsHook);
+
             std::println("Hooked executeCommandLists");
+
+            resizeBuffers1HookImpl = safetyhook::create_inline(kiero::getMethod<&IDXGISwapChain3::ResizeBuffers1>(),
+                                                               &resizeBuffers1Hook);
+            std::println("Hooked resizeBuffers1");
         } else {
             std::println("D3D11 Detected");
         }
 
         presentHookImpl = safetyhook::create_inline(kiero::getMethod<&IDXGISwapChain::Present>(), &presentHook);
         std::println("Hooked present");
-
-
-        resizeBuffers1HookImpl =
-                safetyhook::create_inline(kiero::getMethod<&IDXGISwapChain3::ResizeBuffers1>(), &resizeBuffers1Hook);
-        std::println("Hooked resizeBuffers1");
     } else {
         std::println("Failed to initialize Kiero");
     }
