@@ -10,11 +10,30 @@
 #include <windows.h>
 #include <winrt/base.h>
 
-#include "imgui/imgui.h"
-#include "imgui/imgui_impl_dx11.h"
-#include "imgui/imgui_impl_win32.h"
+#include <RmlUi/Core.h>
+#include <RmlUi/Core/DataModelHandle.h>
+#include <RmlUi_Platform_Win32.h>
+#include <RmlUi_Renderer_DX11.h>
+
+#include <readerwriterqueue.h>
 
 #include "GameInput/GameInput.h"
+
+RenderInterface_DX11 rendererInterface{};
+SystemInterface_Win32 systemInterface{};
+TextInputMethodEditor_Win32 textInputMethodEditor{};
+Rml::Context *mainContext{};
+Rml::DataModelHandle dataModelHandle{};
+
+struct WndProcQueueItem {
+    HWND hWnd;
+    UINT uMsg;
+    WPARAM wParam;
+    LPARAM lParam;
+};
+
+moodycamel::ReaderWriterQueue<WndProcQueueItem> wndProcQueue{};
+
 
 HWND window{};
 bool uninject = false;
@@ -57,30 +76,9 @@ HRESULT presentHook(IDXGISwapChain3 *pSwapChain, UINT SyncInterval, UINT Flags) 
         } else {
             return presentHookImpl.call<HRESULT>(pSwapChain, SyncInterval, Flags);
         }
-
-        ImGui::CreateContext();
-        ImGui::GetIO().IniFilename = nullptr;
-        if (!ImGui_ImplDX11_Init(g_d3d11Device.get(), g_d3d11DeviceContext.get()) || !ImGui_ImplWin32_Init(window)) {
-            std::println("Failed to initialize ImGui backends");
-            return presentHookImpl.call<HRESULT>(pSwapChain, SyncInterval, Flags);
-        }
-        std::println("Initialized ImGui");
+        rendererInterface.Init(g_d3d11Device.get());
+        std::println("Initialized RmlUi Render Interface");
     }
-
-
-    ImGui_ImplDX11_NewFrame();
-    ImGui_ImplWin32_NewFrame();
-    ImGui::NewFrame();
-
-    ImGui::ShowDemoWindow();
-
-    ImGui::Begin("Hello world!");
-    if (ImGui::Button("UnInject")) {
-        uninject = true;
-    }
-    ImGui::End();
-
-    ImGui::Render();
 
     winrt::com_ptr<ID3D11Resource> backBuffer{};
     if (g_d3d11on12Device) {
@@ -118,7 +116,17 @@ HRESULT presentHook(IDXGISwapChain3 *pSwapChain, UINT SyncInterval, UINT Flags) 
     auto renderTargetView = g_mainRenderTargetView.get();
     g_d3d11DeviceContext->OMSetRenderTargets(1, &renderTargetView, nullptr);
 
-    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+    WndProcQueueItem item{};
+    while (wndProcQueue.try_dequeue(item)) {
+        RmlWin32::WindowProcedure(mainContext, textInputMethodEditor, item.hWnd, item.uMsg, item.wParam, item.lParam);
+    } // Dequeue our wndProcQueue items
+
+    mainContext->Update();
+    rendererInterface.BeginFrame(renderTargetView);
+
+    mainContext->Render();
+
+    rendererInterface.EndFrame();
 
     if (g_d3d11on12Device) {
         auto backBufferPtr = backBuffer.get();
@@ -147,6 +155,8 @@ safetyhook::InlineHook resizeBuffers1HookImpl{};
 HRESULT resizeBuffers1Hook(IDXGISwapChain *swapChain, UINT bufferCount, UINT width, UINT height, DXGI_FORMAT newFormat,
                            UINT swapChainFlags, const UINT *pCreationNodeMask, IUnknown *ppPresentQueue) {
 
+    mainContext->SetDimensions({static_cast<int>(width), static_cast<int>(height)});
+    rendererInterface.SetViewport(width, height);
     if (g_d3d11DeviceContext) {
         if (g_d3d11on12Device) {
             wrappedBuffers.resize(0);
@@ -154,6 +164,7 @@ HRESULT resizeBuffers1Hook(IDXGISwapChain *swapChain, UINT bufferCount, UINT wid
 
         g_d3d11DeviceContext->Flush();
     }
+
 
     return resizeBuffers1HookImpl.call<HRESULT>(swapChain, bufferCount, width, height, newFormat, swapChainFlags,
                                                 pCreationNodeMask, ppPresentQueue);
@@ -175,13 +186,14 @@ bool getMouseStateHook(GameInput::v2::IGameInputReading *_self, GameInput::v2::G
     return result;
 };
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
 LONG_PTR wndProcO;
 LRESULT wndProcHook(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, uMsg, wParam, lParam))
-        return true;
+    /*
+     * Rmlui is not thread safe. As Rmlui is processing input when we update our context, we need to queue these WndProc
+     * messages and dequeue them on the same thread as that call.
+     */
+    wndProcQueue.enqueue({hWnd, uMsg, wParam, lParam});
 
     // You can intercept keyboard input, and all other WndProc messages except mouse, here.
 
@@ -200,6 +212,31 @@ void load(HMODULE module) {
         std::println("Failed to get window");
     }
 
+    Rml::Initialise();
+
+    Rml::SetRenderInterface(&rendererInterface);
+
+    Rml::SetSystemInterface(&systemInterface);
+    systemInterface.SetWindow(window);
+
+    RECT rect{};
+    GetWindowRect(window, &rect);
+    auto size = Rml::Vector2i(rect.bottom - rect.top, rect.right - rect.left);
+    mainContext = Rml::CreateContext("mainContext", size, &rendererInterface);
+    rendererInterface.SetViewport(size.x, size.y);
+
+    Rml::LoadFontFace("./Roboto-Black.ttf");
+    std::println("Loaded font");
+
+    auto dataModelCCtor = mainContext->CreateDataModel("dataModel");
+    dataModelCCtor.Bind("uninject", &uninject);
+
+    auto document = mainContext->LoadDocument("Document.rml");
+    if (!document) {
+        std::println("Failed to load document");
+    } else {
+        document->Show();
+    }
 
     /*
      * Rather than using WndProc, GDK Minecraft Bedrock uses GameInput to read mouse state.
@@ -275,6 +312,7 @@ void load(HMODULE module) {
 
     std::this_thread::sleep_for(std::chrono::seconds(1)); // Make sure hooks return safely
 
+    Rml::Shutdown();
 
     std::println("UnInjected");
     FreeConsole();

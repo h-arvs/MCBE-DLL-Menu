@@ -1,0 +1,29 @@
+<rml>
+    <head>
+        <title>Example Document</title>
+        <style>
+            body {
+                font-family: Roboto;
+                font-size: 20px;
+                color: red;
+                display: flex;
+                flex-flow: column;
+            }
+
+            button {
+                background-color: yellow;
+                text-align: center;
+            }
+
+            button:hover{
+                background-color: green;
+                font-size: 30px;
+            }
+
+        </style>
+    </head>
+    <body data-model="dataModel">
+        <h1>Hello World!</h1>
+        <button data-event-click="uninject = true">Uninject</button>
+    </body>
+</rml>
